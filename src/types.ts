@@ -1,0 +1,22 @@
+export type Item = 'food' | 'water' | 'medical';
+export type Quantities = Record<Item, number>;
+export type User = { id: string; name: string; email: string; role: 'coordinator' | 'field_worker' };
+export type Location = { id: string; name: string; lat: number; lng: number; population: number; injured: number; severity: string; contact: string; notes: string; demands: Quantities; received: Quantities; committed: Quantities };
+export type Warehouse = { id: string; name: string; lat: number; lng: number; stock: Quantities; reserved: Quantities };
+export type Vehicle = { id: string; name: string; warehouse_id: string; capacity_kg: number; status: string };
+export type Road = { id: string; from_id: string; to_id: string; minutes: number; distance_km: number; blocked: boolean };
+export type Route = { vehicle_id: string; vehicle_name: string; warehouse_id: string; warehouse_name: string; load_kg: number; capacity_kg: number; travel_minutes: number; distance_km: number; path: [number, number][]; stops: { location_id: string; location_name: string; sequence: number; manifest: Quantities; load_kg: number }[] };
+export type Plan = { id: string; status: string; created_at: string; input_version: number; result: { status: string; routes: Route[]; shortages: { location_id: string; location_name: string; priority: number; remaining: Quantities }[]; total_allocated: Quantities; total_kg: number; travel_minutes: number; distance_km: number; weighted_shortage: number; explanation: string; assumptions: string[] } };
+export type Delivery = { id: string; plan_id: string; vehicle_id: string; warehouse_id: string; location_id: string; assigned_user_id: string; status: string; manifest: Quantities; received: Quantities | null; recipient: string; notes: string; created_at: string; verified_at: string | null };
+export type Activity = { id: string; created_at: string; user_name: string; action: string; detail: string };
+export type Snapshot = { user: User; version: number; demo: boolean; storage: 'sqlite' | 'postgresql'; locations: Location[]; warehouses: Warehouse[]; vehicles: Vehicle[]; roads: Road[]; plans: Plan[]; deliveries: Delivery[]; activity: Activity[]; settings: { food_per_person: number; water_per_person: number; medical_per_injured: number }; summary: { population: number; locations: number; available_kg: number; unmet_units: number; active_deliveries: number; completed_deliveries: number } };
+export const ITEMS: Item[] = ['food', 'water', 'medical'];
+export const ITEM_NAMES = { food: 'Food packets', water: 'Drinking water', medical: 'Medical kits' };
+export const UNITS = { food: 'pkts', water: 'L', medical: 'kits' };
+export const PRIORITY: Record<string, number> = { critical: 5, high: 3, moderate: 2, low: 1 };
+export const num = (n: number | undefined) => (n ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 });
+export const remaining = (l: Location, k: Item) => Math.max(0, (l.demands[k] || 0) - (l.received[k] || 0) - (l.committed[k] || 0));
+export const total = (q: Quantities) => ITEMS.reduce((s, k) => s + (q[k] || 0), 0);
+export const label = (s: string) => s.replace(/_/g, ' ').replace(/^\w/, x => x.toUpperCase());
+export const time = (s: string) => new Date(s).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+

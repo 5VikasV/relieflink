@@ -1,0 +1,5 @@
+fastapi>=0.119,<1
+uvicorn>=0.38,<1
+ortools==9.15.6755
+psycopg[binary]>=3.2,<4
+python-dotenv>=1,<2
