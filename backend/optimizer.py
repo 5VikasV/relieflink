@@ -116,6 +116,26 @@ def solve_plan(snapshot: dict, time_limit: float = 8.0) -> dict:
         )
         for warehouse_id, w in warehouses.items() for item in ITEMS
     }
+    road_blocked_locations = []
+    network = None
+    if any(need.values()) and warehouses and any(road.get("blocked") for road in snapshot.get("roads", [])):
+        network = _network(snapshot)
+        _, open_paths, _ = network
+        isolated = [camp for camp in locations
+                    if any(need[camp["id"], item] > 0 for item in ITEMS)
+                    and not any((home, camp["id"]) in open_paths for home in warehouses)]
+        if isolated:
+            # Only attribute isolation to closures when reopening roads restores
+            # a warehouse connection. Stock and vehicle availability are separate.
+            _, reopened_paths, _ = _network({
+                **snapshot,
+                "roads": [{**road, "blocked": False} for road in snapshot.get("roads", [])],
+            })
+            road_blocked_locations = [
+                {"location_id": camp["id"], "location_name": camp["name"]}
+                for camp in isolated
+                if any((home, camp["id"]) in reopened_paths for home in warehouses)
+            ]
 
     def result(routes: list, status: str, explanation: str) -> dict:
         delivered: dict[tuple, int] = defaultdict(int)
@@ -135,6 +155,7 @@ def solve_plan(snapshot: dict, time_limit: float = 8.0) -> dict:
                                 for row in shortages for item in ITEMS)
         return {
             "status": status, "routes": routes, "shortages": shortages,
+            "road_blocked_locations": road_blocked_locations,
             "total_allocated": total,
             "total_kg": round(sum(total[item] * WEIGHT_GRAMS[item] for item in ITEMS) / 1000, 3),
             "travel_minutes": round(sum(route["travel_minutes"] for route in routes), 3),
@@ -151,7 +172,7 @@ def solve_plan(snapshot: dict, time_limit: float = 8.0) -> dict:
     if not vehicles or not any(available.values()):
         return result([], "empty", "No dispatchable allocation: available vehicles and unreserved warehouse stock are both required.")
 
-    nodes, paths, costs = _network(snapshot)
+    nodes, paths, costs = network if network is not None else _network(snapshot)
     model = cp_model.CpModel()
     quantities: dict[tuple, Any] = {}
     tours = []

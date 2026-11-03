@@ -118,6 +118,37 @@ def test_zero_available_fleet_produces_no_allocations(app):
         assert all(result['total_allocated'][item] == 0 for item in ITEMS)
 
 
+def test_road_isolation_warning_is_saved_and_other_deliveries_can_be_approved(app):
+    with client_for(app) as client:
+        login(client)
+        original = state(client)
+        camp = next(c for c in original['locations'] if c['severity'] == 'critical')
+        connections = [r for r in original['roads'] if camp['id'] in (r['from_id'], r['to_id'])]
+        assert connections
+        for road in connections:
+            response = client.patch(f'/api/roads/{road["id"]}', json={'blocked': True})
+            assert response.status_code == 200, response.text
+
+        plan = generate(client)
+        expected = [{'location_id': camp['id'], 'location_name': camp['name']}]
+        assert plan['result']['road_blocked_locations'] == expected
+        assert plan['result']['routes']
+        assert all(s['location_id'] != camp['id'] for r in plan['result']['routes'] for s in r['stops'])
+        saved = next(p for p in state(client)['plans'] if p['id'] == plan['id'])
+        assert saved['result']['road_blocked_locations'] == expected
+
+        approve(client, plan)
+        deliveries = [d for d in state(client)['deliveries'] if d['plan_id'] == plan['id']]
+        assert deliveries and all(d['location_id'] != camp['id'] for d in deliveries)
+
+        response = client.patch(f'/api/roads/{connections[0]["id"]}', json={'blocked': False})
+        assert response.status_code == 200, response.text
+        assert generate(client)['result']['road_blocked_locations'] == []
+        # Historical proposals retain the warning from their own input snapshot.
+        saved = next(p for p in state(client)['plans'] if p['id'] == plan['id'])
+        assert saved['result']['road_blocked_locations'] == expected
+
+
 def test_stale_plan_cannot_reserve_changed_inventory(app):
     with client_for(app) as client:
         login(client)

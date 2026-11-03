@@ -36,6 +36,8 @@
 html { font-size: 100%; }
 body { font-size: var(--text-base); line-height: 1.55; }
 small { font-size: var(--text-sm); }
+.warning-note.road-blocked-warning { align-items: flex-start; flex-wrap: nowrap; color: #90611f; }
+.road-blocked-warning p { min-width: 0; overflow-wrap: anywhere; }
 
 .button, .button.small, .text-button, .heading-actions .button,
 .dialog-footer .button, .login-submit, .sidebar nav button,

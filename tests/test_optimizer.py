@@ -3,6 +3,8 @@
 from copy import deepcopy
 import json
 
+import pytest
+
 from backend.optimizer import solve_plan
 
 
@@ -28,6 +30,7 @@ def test_ample_resources_fulfil_every_unit_on_a_real_tour():
     assert result["total_allocated"] == {"food": 10, "water": 20, "medical": 2}
     assert result["total_kg"] == 31
     assert result["weighted_shortage"] == 0
+    assert result["road_blocked_locations"] == []
     assert result["travel_minutes"] == 20
     assert result["distance_km"] == 10
     assert result["routes"][0]["path"][0] == result["routes"][0]["path"][-1]
@@ -50,6 +53,71 @@ def test_unreachable_camp_has_no_allocation():
     result = solve_plan(data, 1)
     assert result["routes"] == []
     assert result["total_kg"] == 0
+    assert result["road_blocked_locations"] == [{"location_id": "camp", "location_name": "Camp"}]
+
+
+def test_isolated_critical_camp_warns_without_preventing_other_deliveries():
+    data = snapshot()
+    data["locations"][0]["severity"] = "critical"
+    data["roads"][0]["blocked"] = True
+    data["locations"].append({**deepcopy(data["locations"][0]), "id": "reachable", "name": "Reachable Camp",
+                              "severity": "low", "lat": 13.02, "lng": 77.62})
+    data["roads"].append({"id": "r2", "from_id": "depot", "to_id": "reachable", "minutes": 7, "distance_km": 3})
+    original = deepcopy(data)
+    result = solve_plan(data, 2)
+    assert result["road_blocked_locations"] == [{"location_id": "camp", "location_name": "Camp"}]
+    assert {s["location_id"] for r in result["routes"] for s in r["stops"]} == {"reachable"}
+    assert next(s for s in result["shortages"] if s["location_id"] == "camp")["remaining"] == data["locations"][0]["demands"]
+    assert data == original
+
+    data["roads"][0]["blocked"] = False
+    reopened = solve_plan(data, 2)
+    assert reopened["road_blocked_locations"] == []
+    assert {s["location_id"] for r in reopened["routes"] for s in r["stops"]} == {"camp", "reachable"}
+
+
+def test_open_connection_from_another_warehouse_prevents_closure_warning():
+    data = snapshot()
+    data["roads"][0]["blocked"] = True
+    data["warehouses"].append({"id": "other", "name": "Other Depot", "lat": 13.02, "lng": 77.62,
+                               "stock": {}, "reserved": {}})
+    data["roads"].append({"id": "r2", "from_id": "other", "to_id": "camp", "minutes": 5, "distance_km": 2})
+    result = solve_plan(data, 1)
+    # No truck or stock at this depot is a resource issue, not complete road isolation.
+    assert result["routes"] == []
+    assert result["road_blocked_locations"] == []
+
+
+def test_missing_network_connection_is_not_misreported_as_a_closure():
+    data = snapshot()
+    data["warehouses"].append({"id": "other", "name": "Other Depot", "lat": 13.02, "lng": 77.62,
+                               "stock": {}, "reserved": {}})
+    data["roads"] = [{"id": "r2", "from_id": "depot", "to_id": "other", "minutes": 5,
+                      "distance_km": 2, "blocked": True}]
+    assert solve_plan(data, 1)["road_blocked_locations"] == []
+
+
+@pytest.mark.parametrize("fulfilled_by", ["received", "committed"])
+def test_isolated_camp_without_outstanding_need_has_no_warning(fulfilled_by):
+    data = snapshot()
+    data["roads"][0]["blocked"] = True
+    data["locations"][0][fulfilled_by] = dict(data["locations"][0]["demands"])
+    assert solve_plan(data, 1)["road_blocked_locations"] == []
+
+
+@pytest.mark.parametrize("missing_resource", ["vehicles", "stock"])
+def test_resource_shortage_does_not_trigger_a_road_closure_warning(missing_resource):
+    data = snapshot()
+    if missing_resource == "vehicles":
+        data["vehicles"] = []
+    else:
+        data["warehouses"][0]["stock"] = {}
+    result = solve_plan(data, 1)
+    assert result["routes"] == []
+    assert result["road_blocked_locations"] == []
+    # A real closure must still be explained when resource shortages also exist.
+    data["roads"][0]["blocked"] = True
+    assert solve_plan(data, 1)["road_blocked_locations"] == [{"location_id": "camp", "location_name": "Camp"}]
 
 
 def test_dijkstra_uses_detour_when_direct_road_is_blocked():
@@ -66,6 +134,7 @@ def test_dijkstra_uses_detour_when_direct_road_is_blocked():
     assert detour["travel_minutes"] == 30
     assert [13.1, 77.7] in detour["routes"][0]["path"]
     assert detour["total_allocated"] == direct["total_allocated"]
+    assert detour["road_blocked_locations"] == []
 
 
 def test_vehicle_payload_and_warehouse_shared_stock_are_conserved():
@@ -126,6 +195,7 @@ def test_no_roads_never_becomes_a_straight_line_route():
     result = solve_plan(data, 1)
     assert not result["routes"]
     assert result["total_kg"] == 0
+    assert result["road_blocked_locations"] == []
 
 
 def test_fractional_capacity_smaller_than_one_unit_produces_no_cargo():
